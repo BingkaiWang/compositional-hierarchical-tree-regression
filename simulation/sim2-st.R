@@ -1,6 +1,6 @@
 rm(list=ls())
 set.seed(123)
-# setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/")
+# setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/simulation/")
 setwd("~/graphical_model/hierarchical-lasso")
 library(tidyverse)
 library(glmnet)
@@ -25,29 +25,30 @@ construct_D <- function(my.roi, eta, scale = F, sd = NULL){
   if(scale == T){
     weight.mat <- diag(sd) %*% weight.mat
   }
-  D <- vector("list", ncol(my.roi)-1)
-  for(k in 1:length(D)){
-    D[[k]] <- bdiag(0)
+  D <- matrix(0, nrow = q-1, ncol = q)
+  colnames(D) <- my.roi[,1]
+  iter <- 1
+  for(k in 1:(ncol(my.roi)-1)){
     for(i in unique(my.roi[,k+1])){
       index <- my.roi[my.roi[,k+1] == i,k]
       if(length(unique(index)) > 1){
-        d <- matrix(0, nrow = length(unique(index))-1, ncol = length(index))
-        for(j in 1:nrow(d)){
-          d[j,index == unique(index)[j]] <- t(weight.mat[my.roi[,k] == unique(index)[j],k])
-          d[j,index == unique(index)[j+1]] <- -t(weight.mat[my.roi[,k] == unique(index)[j+1],k])
+        for(j in 1:(length(unique(index))-1)){
+          leafindex_j <- my.roi[my.roi[,k] == unique(index)[j],1]
+          leafindex_jp1 <- my.roi[my.roi[,k] == unique(index)[j+1],1]
+          D[iter, leafindex_j] <- t(weight.mat[my.roi[,k] == unique(index)[j],k])
+          D[iter, leafindex_jp1] <- -t(weight.mat[my.roi[,k] == unique(index)[j+1],k])
+          iter <- iter + 1
         }
-        D[[k]] <- bdiag(D[[k]], d)
-      } else {
-        D[[k]] <- bdiag(D[[k]], matrix(0, nrow = 1, ncol = length(index)))
       }
     }
-    D[[k]] <- D[[k]][rowSums(abs(D[[k]]))>0, -1]
   }
-  D_mat <- (diag(q) - matrix(1/q, nrow = q, ncol = q)) * eta
-  for(k in 1:length(D)){
-    D_mat <- rbind(D_mat, D[[k]] * (1-eta))
+  if(eta == 0){
+    D_mat <- D
+  } else if(eta == 1){
+    D_mat <- (diag(q) - matrix(1/q, nrow = q, ncol = q))
+  } else {
+    D_mat <- rbind((diag(q) - matrix(1/q, nrow = q, ncol = q)) * eta, D * (1-eta))
   }
-  D_mat <- D_mat[rowSums(abs(D_mat))>0, ]
   return(D_mat)
 }
 construct_TASSO <- function(my.roi){
@@ -72,7 +73,6 @@ construct_TASSO <- function(my.roi){
     return(D_mat[-nrow(D_mat),])
   }
 }
-
 calculate_beta <- function(my.roi, alpha){
   my.roi <- my.roi[,-ncol(my.roi)]
   p <- length(unique(unlist(my.roi)))
@@ -105,125 +105,152 @@ calculate_beta <- function(my.roi, alpha){
 
 
 # data setup =====================
-n <- 890
 n_sim <- 100
-sim.tree <- readRDS("tree-structure.rds")
-pho <- 0.2
+X_complete <- readRDS("sim2-data.rds")[[1]]
+sim.tree <- readRDS("sim2-data.rds")[[2]]
+n <- nrow(X_complete)
 p.leaf <- nrow(sim.tree)
-sigma.leaf <- diag(p.leaf)
-for(i in 1:p.leaf){
-  for(j in 1:p.leaf){
-    sigma.leaf[i,j] <- pho^abs(i-j)
-  }
-}
-param_grid <- expand.grid(eta = seq(0.0, 1, by = 0.05), gamma = c(1e-4, 1e-2))
+param_grid <- expand.grid(eta = seq(0.0, 1, by = 0.05))
 param_grid_lasso <- expand.grid(gamma = c(1e-4, 1e-2))
 param_grid_tasso <- expand.grid(gamma = c(1e-4, 1e-2))
-noise_st <- 0.01 * c(0.2, 1, 5) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
+# noise_st <- sd(rowSums(X_complete[,which(sim.tree$level1 == "CSF.lvl1")]) - 
+#                  1.5 * rowSums(X_complete[,which(sim.tree$level1 == "Mesencephalon.lvl1")]) - 
+#                  rowSums(X_complete[,which(sim.tree$level1 == "Metencephalon.lvl1")])) * c(0.2, 1, 5) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
+noise_st <- sd(rowSums(X_complete[,which(sim.tree$level1 == "Telencephalon_L.lvl1")]) - 
+                 rowSums(X_complete[,which(sim.tree$level1 == "Telencephalon_R.lvl1")])) * c(0.2, 1, 5) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 
-
-
-# sparse tree: Y = 3 * CSF - 2 * Mesencephalon - Metencephalon
-beta_true <- c(rep(0,359), 3, 0, 0, -2, -1, 0, 0)
+# sparse tree: Y = Telencephalon_L - Telencephalon_R
+beta_true <- c(rep(0,361), 1, -1, rep(0,7))
 sim2_st <- vector("list", length(noise_st))
 for(t in 1:length(sim2_st)){
   sim2_st[[t]] <- foreach(j = 1:n_sim, .combine = cbind, .packages = packages) %dopar% {
-    W.leaf <- exp(mvrnorm(n, mu = rep(0, p.leaf), Sigma = sigma.leaf))
-    X.leaf <- scale(W.leaf / (rowSums(W.leaf) %*% t(rep(1, p.leaf))), scale = F)
-    Y <- 3 * rowSums(X.leaf[,1:32]) - 2 * rowSums(X.leaf[,43:50]) - rowSums(X.leaf[,51:70]) + rnorm(n, sd = noise_st[t])
-    result <- rep(NA, length = 26)
+    X.leaf <- X_complete[sample(1:n, n, replace = T),]
+    X.leaf.centered <- scale(X.leaf, scale = F)
+    # Y <- 3 + rowSums(X.leaf.centered[,which(sim.tree$level1 == "CSF.lvl1")]) - 
+    #   1.5 * rowSums(X.leaf.centered[,which(sim.tree$level1 == "Mesencephalon.lvl1")]) - 
+    #   rowSums(X.leaf.centered[,which(sim.tree$level1 == "Metencephalon.lvl1")]) + rnorm(n, sd = noise_st[t])
+    Y <- 3 + rowSums(X.leaf.centered[,which(sim.tree$level1 == "Telencephalon_L.lvl1")]) - 
+      rowSums(X.leaf.centered[,which(sim.tree$level1 == "Telencephalon_R.lvl1")]) + rnorm(n, sd = noise_st[t])
+    Y.centered <- scale(Y, scale = F)
+    result <- rep(NA, length = 30)
     
     # CTASSO with AIC
-    tunning_param <- map_dbl(1:nrow(param_grid), function(j){
-      sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_D(sim.tree, param_grid[j,1]), eps = param_grid[j,2])
-      df <- sim.fit$df - n
+    result[1:5] <- tryCatch(
+      {tunning_param <- map_dbl(1:nrow(param_grid), function(j){
+        sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_D(sim.tree, param_grid[j,1]))
+        df <- sim.fit$df
+        IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
+        min(IC)
+      }) %>% which.min %>% param_grid[.,] %>% unlist()
+      sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_D(sim.tree, tunning_param[1]))
+      df <- sim.fit$df
       IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
-      min(IC)
-    }) %>% which.min %>% param_grid[.,] %>% unlist()
-    sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_D(sim.tree, tunning_param[1]), eps = tunning_param[2])
-    df <- sim.fit$df - n
-    IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
-    alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
-    beta <- calculate_beta(sim.tree, alpha)
-    result[1:5] <- c(tunning_param[1], sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-                     specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+      alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
+      beta <- calculate_beta(sim.tree, alpha)
+      c(tunning_param[1], sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
+        specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))},
+      error = function(err) {print(err); rep(NA,5)}
+    )
     
     # CTASSO with BIC
-    tunning_param <- map_dbl(1:nrow(param_grid), function(j){
-      sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_D(sim.tree, param_grid[j,1]), eps = param_grid[j,2])
-      df <- sim.fit$df - n
+    result[6:10] <- tryCatch(
+      {tunning_param <- map_dbl(1:nrow(param_grid), function(j){
+        sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_D(sim.tree, param_grid[j,1]))
+        df <- sim.fit$df
+        IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
+        min(IC)
+      }) %>% which.min %>% param_grid[.,] %>% unlist()
+      sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_D(sim.tree, tunning_param[1]))
+      df <- sim.fit$df
       IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
-      min(IC)
-    }) %>% which.min %>% param_grid[.,] %>% unlist()
-    sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_D(sim.tree, tunning_param[1]), eps = tunning_param[2])
-    df <- sim.fit$df - n
-    IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
-    alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
-    beta <- calculate_beta(sim.tree, alpha)
-    result[6:10] <- c(tunning_param[1], sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-                      specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+      alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
+      beta <- calculate_beta(sim.tree, alpha)
+      c(tunning_param[1], sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01),
+        specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))},
+      error = function(err) {print(err); rep(NA,5)}
+    )
     
     # TASSO with AIC
-    tunning_param <- map_dbl(1:nrow(param_grid_tasso), function(j){
-      sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_TASSO(sim.tree), eps = param_grid_tasso[j,1])
-      df <- sim.fit$df - n
-      IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
-      min(IC)
-    }) %>% which.min %>% param_grid_tasso[.,] %>% unlist()
-    sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_TASSO(sim.tree), eps = tunning_param)
-    df <- sim.fit$df - n
-    IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
-    alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
-    beta <- calculate_beta(sim.tree, alpha)
-    result[11:14] <- c(sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-                       specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+    result[11:15] <- tryCatch(
+      {
+        tunning_param <- map_dbl(1:nrow(param_grid_tasso), function(j){
+          sim.fit <- genlasso(y = Y, X = X.leaf.centered, D = construct_TASSO(sim.tree), eps = param_grid_tasso[j,1])
+          df <- sim.fit$df
+          IC <- n * log(colSums((Y.centered %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
+          min(IC)
+        }) %>% which.min %>% param_grid_tasso[.,] %>% unlist()
+        sim.fit <- genlasso(y = Y, X = X.leaf.centered, D = construct_TASSO(sim.tree), eps = tunning_param)
+        df <- sim.fit$df
+        IC <- n * log(colSums((Y.centered %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
+        alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
+        beta <- calculate_beta(sim.tree, alpha)
+        c(tunning_param, sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
+          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+      },
+      error = function(err) {print(err); rep(NA,5)}
+    )
     
     # TASSO with BIC
-    tunning_param <- map_dbl(1:nrow(param_grid_tasso), function(j){
-      sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_TASSO(sim.tree), eps = param_grid_tasso[j,1])
-      df <- sim.fit$df - n
-      IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
-      min(IC)
-    }) %>% which.min %>% param_grid_tasso[.,] %>% unlist()
-    sim.fit <- genlasso(y = Y, X = X.leaf, D = construct_TASSO(sim.tree), eps = tunning_param)
-    df <- sim.fit$df - n
-    IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
-    alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
-    beta <- calculate_beta(sim.tree, alpha)
-    result[15:18] <- c(sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-                       specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+    result[16:20] <- tryCatch(
+      {
+        tunning_param <- map_dbl(1:nrow(param_grid_tasso), function(j){
+          sim.fit <- genlasso(y = Y, X = X.leaf.centered, D = construct_TASSO(sim.tree), eps = param_grid_tasso[j,1])
+          df <- sim.fit$df
+          IC <- n * log(colSums((Y.centered %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
+          min(IC)
+        }) %>% which.min %>% param_grid_tasso[.,] %>% unlist()
+        sim.fit <- genlasso(y = Y, X = X.leaf.centered, D = construct_TASSO(sim.tree), eps = tunning_param)
+        df <- sim.fit$df
+        IC <- n * log(colSums((Y.centered %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
+        alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
+        beta <- calculate_beta(sim.tree, alpha)
+        c(tunning_param, sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
+          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+      },
+      error = function(err) {print(err); rep(NA,5)}
+    )
     
     # LASSO with AIC
-    tunning_param <- map_dbl(1:nrow(param_grid_lasso), function(j){
-      sim.fit <- genlasso(y = Y, X = X.leaf, D = diag(p.leaf), eps = param_grid_lasso[j,1])
-      df <- sim.fit$df - n
-      IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
-      min(IC)
-    }) %>% which.min %>% param_grid_lasso[.,] %>% unlist()
-    
-    sim.fit <- genlasso(y = Y, X = X.leaf, D = diag(p.leaf), eps = tunning_param)
-    df <- sim.fit$df - n
-    IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
-    alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
-    beta <- calculate_beta(sim.tree, alpha)
-    result[19:22] <- c(sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-                       specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+    result[21:25] <- tryCatch(
+      {
+        tunning_param <- map_dbl(1:nrow(param_grid_lasso), function(j){
+          sim.fit <- genlasso(y = Y, X = X.leaf.centered, D = diag(p.leaf), eps = param_grid_lasso[j,1])
+          df <- sim.fit$df
+          IC <- n * log(colSums((Y.centered %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
+          min(IC)
+        }) %>% which.min %>% param_grid_lasso[.,] %>% unlist()
+        
+        sim.fit <- genlasso(y = Y, X = X.leaf.centered, D = diag(p.leaf), eps = tunning_param)
+        df <- sim.fit$df
+        IC <- n * log(colSums((Y.centered %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + 2 * df
+        alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
+        beta <- calculate_beta(sim.tree, alpha)
+        c(tunning_param, sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
+          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+      },
+      error = function(err) {print(err); rep(NA,5)}
+    )
     
     # LASSO with BIC
-    tunning_param <- map_dbl(1:nrow(param_grid_lasso), function(j){
-      sim.fit <- genlasso(y = Y, X = X.leaf, D = diag(p.leaf), eps = param_grid_lasso[j,1])
-      df <- sim.fit$df - n
-      IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
-      min(IC)
-    }) %>% which.min %>% param_grid_lasso[.,] %>% unlist()
-    
-    sim.fit <- genlasso(y = Y, X = X.leaf, D = diag(p.leaf), eps = tunning_param)
-    df <- sim.fit$df - n
-    IC <- n * log(colSums((Y %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
-    alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
-    beta <- calculate_beta(sim.tree, alpha)
-    result[23:26] <- c(sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-                       specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+    result[26:30] <- tryCatch(
+      {
+        tunning_param <- map_dbl(1:nrow(param_grid_lasso), function(j){
+          sim.fit <- genlasso(y = Y, X = X.leaf.centered, D = diag(p.leaf), eps = param_grid_lasso[j,1])
+          df <- sim.fit$df
+          IC <- n * log(colSums((Y.centered %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
+          min(IC)
+        }) %>% which.min %>% param_grid_lasso[.,] %>% unlist()
+        
+        sim.fit <- genlasso(y = Y, X = X.leaf.centered, D = diag(p.leaf), eps = tunning_param)
+        df <- sim.fit$df
+        IC <- n * log(colSums((Y.centered %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
+        alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
+        beta <- calculate_beta(sim.tree, alpha)
+        c(tunning_param, sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
+          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+      },
+      error = function(err) {print(err); rep(NA,5)}
+    )
     result
   }
 }

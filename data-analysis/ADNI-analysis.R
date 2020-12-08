@@ -47,6 +47,28 @@ construct_D <- function(my.roi, eta, scale = F, sd = NULL){
   }
   return(D_mat)
 }
+construct_TASSO <- function(my.roi){
+  q <- nrow(my.roi)
+  p <- length(unique(unlist(my.roi)))
+  P_star <- diag(q) - matrix(1/q, nrow = q, ncol = q)
+  P_2 <- matrix(0, nrow = p-q, ncol = q)
+  mark <- 1
+  for(k in 2:ncol(my.roi)){
+    for(i in unique(my.roi[,k])){
+      index <- my.roi[my.roi[,k] == i, 1:(k-1), drop = F] %>% apply(., 2, function(x){length(unique(x))})
+      if(min(index) > 1){
+        P_2[mark, which(my.roi[,k] == i)] <- 1
+        mark <- mark + 1
+      }
+    }
+  }
+  if(mark != p-q+1){
+    stop("An error has occurred!")
+  } else{
+    D_mat <- rbind(0.5 * P_star, 0.5 * P_2 %*% P_star)
+    return(D_mat[-nrow(D_mat),])
+  }
+}
 calculate_beta <- function(my.roi, alpha){
   my.roi <- my.roi[,-ncol(my.roi)]
   p <- length(unique(unlist(my.roi)))
@@ -96,62 +118,93 @@ Y_complete <- Y[nonmissing_indi]
 Diagnosis_complete <- Diagnosis[nonmissing_indi]
 X_complete <- dat[[6]][nonmissing_indi, ]
 X_complete <- X_complete / (rowSums(X_complete) %*% t(rep(1, ncol(X_complete))))
-param_grid <- expand.grid(eta = seq(0, 1, by = 0.05), gamma = c(1e-4, 1e-2))
+param_grid <- expand.grid(eta = seq(0, 1, by = 0.05))
 n <- length(Y_complete)
 # saveRDS(list(X_complete, my.roi), "../simulation/sim2-data.rds")
+# saveRDS(my.roi, "tree-structure.rds")
 
-# All group analysis
+# All group analysis CTASSO
 tuning_param_all <- foreach(j = 1:nrow(param_grid), .combine = cbind, .packages = packages) %dopar% {
-  D_mat <- construct_D(my.roi, param_grid[j,1], scale = T, sd = apply(X_complete,2,sd) * 1e5)
-  genlasso.fit <- genlasso(y = scale(Y_complete), X = scale(X_complete), D = D_mat, eps = param_grid[j,2])
+  D_mat <- construct_D(my.roi, param_grid[j,1])
+  genlasso.fit <- genlasso(y = Y_complete, X = X_complete, D = D_mat)
   df <- genlasso.fit$df
-  n * log(colSums((scale(Y_complete) %*% t(rep(1,length(df))) - genlasso.fit$fit)^2)) + log(n) * df
+  n * log(colSums((Y_complete %*% t(rep(1,length(df))) - genlasso.fit$fit)^2)) + log(n) * df
 }
 tuning_param <-tuning_param_all %>% apply(.,2,min) %>% which.min %>% param_grid[.,] %>% unlist()
-D_mat <- construct_D(my.roi, tuning_param[1], scale = T, sd = apply(X_complete,2,sd) * 1e5)
-genlasso.fit <- genlasso(y = scale(Y_complete), X = scale(X_complete), D = D_mat, eps = tuning_param[2])
+D_mat <- construct_D(my.roi, tuning_param[1])
+genlasso.fit <- genlasso(y = Y_complete, X = X_complete, D = D_mat)
 df <- genlasso.fit$df
-IC <- n * log((colSums((scale(Y_complete) %*% t(rep(1,length(df))) - genlasso.fit$fit)^2))) + log(n) * df
+IC <- n * log((colSums((Y_complete %*% t(rep(1,length(df))) - genlasso.fit$fit)^2))) + log(n) * df
 alpha_allgroup <- coef(genlasso.fit, lambda = genlasso.fit$lambda[which.min(IC)])$beta
+alpha_allgroup <- alpha_allgroup - mean(alpha_allgroup)
 beta_allgroup <- calculate_beta(my.roi, alpha_allgroup)
 saveRDS(list(tuning_param_all, alpha_allgroup, beta_allgroup), file = "ADNI-CTASSO-BIC-allgroup.rds")
-write.table(cbind(thresholding(alpha_allgroup, 0.01), ROI.info$Index), "alpha-allgroup.txt", col.names = F)
+# write.table(cbind(thresholding(alpha_allgroup, 0.01), ROI.info$Index), "alpha-allgroup.txt", col.names = F)
 # write.table(cbind(thresholding(beta_allgroup, 0.01), 1:length(beta_allgroup)), "beta-allgroup.txt", col.names = F)
 
-# AD + MCI group analysis
-Y_disease <- Y_complete[Diagnosis_complete != "CN"]
-X_disease <- X_complete[Diagnosis_complete != "CN",]
-X_disease <- X_disease / (rowSums(X_disease) %*% t(rep(1, ncol(X_disease))))
-n <- length(Y_disease)
-tuning_param_all <- foreach(j = 1:nrow(param_grid), .combine = cbind, .packages = packages) %dopar% {
-  D_mat <- construct_D(my.roi, param_grid[j,1], scale = T, sd = apply(X_disease,2,sd) * 1e5)
-  genlasso.fit <- genlasso(y = scale(Y_disease), X = scale(X_disease), D = D_mat, eps = param_grid[j,2])
-  df <- genlasso.fit$df
-  n * log(colSums((scale(Y_disease) %*% t(rep(1,length(df))) - genlasso.fit$fit)^2)) + log(n) * df
-}
-tuning_param <-tuning_param_all %>% apply(.,2,min) %>% which.min %>% param_grid[.,] %>% unlist()
-D_mat <- construct_D(my.roi, tuning_param[1], scale = T, sd = apply(X_disease,2,sd) * 1e5)
-genlasso.fit <- genlasso(y = scale(Y_disease), X = scale(X_disease), D = D_mat, eps = tuning_param[2])
+# All group analysis TASSO
+D_mat <- construct_TASSO(my.roi)
+genlasso.fit <- genlasso(y = Y_complete, X = X_complete, D = D_mat)
 df <- genlasso.fit$df
-IC <- n * log((colSums((scale(Y_disease) %*% t(rep(1,length(df))) - genlasso.fit$fit)^2))) + log(n) * df
-alpha_disease <- coef(genlasso.fit, lambda = genlasso.fit$lambda[which.min(IC)])$beta
-beta_disease <- calculate_beta(my.roi, alpha_disease)
-saveRDS(list(tuning_param_all, alpha_disease, beta_disease), file = "ADNI-CTASSO-BIC-disease.rds")
-write.table(cbind(thresholding(alpha_disease, 0.01), ROI.info$Index), "alpha-disease.txt", col.names = F)
-# write.table(cbind(thresholding(beta_disease, 0.01), 1:length(beta_disease)), "beta-disease.txt", col.names = F)
-beta_disease_coef <- cbind(thresholding(beta_disease[my.roi[,1],], 0.01), thresholding(beta_disease[my.roi[,2],], 0.01),
-                           thresholding(beta_disease[my.roi[,3],], 0.01), thresholding(beta_disease[my.roi[,4],], 0.01),
-                           thresholding(beta_disease[my.roi[,5],], 0.01), thresholding(beta_disease[my.roi[,6],], 0.01))
-beta1 <- data.frame(beta=ifelse(my.roi$level3 == "LateralVentricle_L.lvl3", thresholding(rowSums(beta_disease_coef), 0.01), 0), ROI.info$Index)
-write.table(beta1, "beta1.txt", col.names = F)
-beta2 <- data.frame(beta=ifelse(my.roi$level4 == "BasalForebrain_L.lvl2", thresholding(rowSums(beta_disease_coef), 0.01), 0), ROI.info$Index)
-write.table(beta2, "beta2.txt", col.names = F)
-beta3 <- data.frame(beta=ifelse(my.roi$level3 %in% c("Temporal_L.lvl3", "Occipital_L.lvl3"), thresholding(rowSums(beta_disease_coef), 0.01), 0), ROI.info$Index)
-write.table(beta3, "beta3.txt", col.names = F)
-beta4 <- data.frame(beta=ifelse(my.roi$level3 %in% c("Temporal_R.lvl3", "Occipital_R.lvl3"), thresholding(rowSums(beta_disease_coef), 0.01), 0), ROI.info$Index)
-write.table(beta4, "beta4.txt", col.names = F)
+IC <- n * log((colSums((scale(Y_complete, scale = F) %*% t(rep(1,length(df))) - genlasso.fit$fit)^2))) + log(n) * df
+alpha_TASSO <- coef(genlasso.fit, lambda = genlasso.fit$lambda[which.min(IC)])$beta
+beta_TASSO <- calculate_beta(my.roi, alpha_TASSO)
+sum(round(alpha_TASSO - mean(alpha_TASSO)) > 0)
 
-s# data.frame(roi = my.roi[,1], coef = alpha) %>% filter(abs(alpha) > 0.001)
+# all group analysis LASSO
+genlasso.fit <- genlasso(y = Y_complete, X = scale(X_complete, scale = F), D = diag(nrow(my.roi)))
+df <- genlasso.fit$df
+IC <- n * log((colSums((scale(Y_complete, scale = F) %*% t(rep(1,length(df))) - genlasso.fit$fit)^2))) + log(n) * df
+alpha_LASSO <- coef(genlasso.fit, lambda = genlasso.fit$lambda[which.min(IC)])$beta
+beta_LASSO <- calculate_beta(my.roi, alpha_LASSO)
+data.frame(names = my.roi[,1], alpha = round(alpha_LASSO - mean(alpha_LASSO))) 
+sum(round(alpha_LASSO - mean(alpha_LASSO)) > 0)
+
+alpha_comparison <- data.frame(names = my.roi[,1], 
+                               alpha_CTASSO = round(alpha_allgroup - mean(alpha_allgroup)),
+                               alpha_TASSO = round(alpha_TASSO - mean(alpha_TASSO)),
+                               alpha_LASSO = round(alpha_LASSO - mean(alpha_LASSO)))
+beta_comparion <- data.frame(beta_CTASSO = round(beta_allgroup - mean(beta_allgroup)),
+                             beta_TASSO = round(beta_TASSO - mean(beta_TASSO)),
+                             beta_LASSO = round(beta_LASSO - mean(beta_LASSO)))
+colSums(abs(beta_comparion)>0)
+(abs(alpha_comparison[,2:4]) > 0) %>% apply(2,sum)
+(abs(beta_comparion) > 0) %>% apply(1,sum) %>% table
+# # AD + MCI group analysis
+# Y_disease <- Y_complete[Diagnosis_complete != "CN"]
+# X_disease <- X_complete[Diagnosis_complete != "CN",]
+# X_disease <- X_disease / (rowSums(X_disease) %*% t(rep(1, ncol(X_disease))))
+# n <- length(Y_disease)
+# tuning_param_all <- foreach(j = 1:nrow(param_grid), .combine = cbind, .packages = packages) %dopar% {
+#   D_mat <- construct_D(my.roi, param_grid[j,1])
+#   genlasso.fit <- genlasso(y = Y_disease, X = X_disease, D = D_mat)
+#   df <- genlasso.fit$df
+#   n * log(colSums((Y_disease %*% t(rep(1,length(df))) - genlasso.fit$fit)^2)) + log(n) * df
+# }
+# tuning_param <- tuning_param_all %>% apply(.,2,min) %>% which.min %>% param_grid[.,] %>% unlist()
+# D_mat <- construct_D(my.roi, tuning_param[1])
+# genlasso.fit <- genlasso(y = Y_disease, X = X_disease, D = D_mat, eps = tuning_param[2])
+# df <- genlasso.fit$df
+# IC <- n * log((colSums((Y_disease %*% t(rep(1,length(df))) - genlasso.fit$fit)^2))) + log(n) * df
+# alpha_disease <- coef(genlasso.fit, lambda = genlasso.fit$lambda[which.min(IC)])$beta
+# beta_disease <- calculate_beta(my.roi, alpha_disease)
+# saveRDS(list(tuning_param_all, alpha_disease, beta_disease), file = "ADNI-CTASSO-BIC-disease.rds")
+
+# write.table(cbind(thresholding(alpha_disease, 0.01), ROI.info$Index), "alpha-disease.txt", col.names = F)
+# # write.table(cbind(thresholding(beta_disease, 0.01), 1:length(beta_disease)), "beta-disease.txt", col.names = F)
+# beta_disease_coef <- cbind(thresholding(beta_disease[my.roi[,1],], 0.01), thresholding(beta_disease[my.roi[,2],], 0.01),
+#                            thresholding(beta_disease[my.roi[,3],], 0.01), thresholding(beta_disease[my.roi[,4],], 0.01),
+#                            thresholding(beta_disease[my.roi[,5],], 0.01), thresholding(beta_disease[my.roi[,6],], 0.01))
+# beta1 <- data.frame(beta=ifelse(my.roi$level3 == "LateralVentricle_L.lvl3", thresholding(rowSums(beta_disease_coef), 0.01), 0), ROI.info$Index)
+# write.table(beta1, "beta1.txt", col.names = F)
+# beta2 <- data.frame(beta=ifelse(my.roi$level4 == "BasalForebrain_L.lvl2", thresholding(rowSums(beta_disease_coef), 0.01), 0), ROI.info$Index)
+# write.table(beta2, "beta2.txt", col.names = F)
+# beta3 <- data.frame(beta=ifelse(my.roi$level3 %in% c("Temporal_L.lvl3", "Occipital_L.lvl3"), thresholding(rowSums(beta_disease_coef), 0.01), 0), ROI.info$Index)
+# write.table(beta3, "beta3.txt", col.names = F)
+# beta4 <- data.frame(beta=ifelse(my.roi$level3 %in% c("Temporal_R.lvl3", "Occipital_R.lvl3"), thresholding(rowSums(beta_disease_coef), 0.01), 0), ROI.info$Index)
+# write.table(beta4, "beta4.txt", col.names = F)
+
+# data.frame(roi = my.roi[,1], coef = alpha) %>% filter(abs(alpha) > 0.001)
 # data.frame(roi = unique(unlist(my.roi[,-7])), coef = beta) %>% filter(abs(beta) > 0.01)
 # 
 # x5 <- thresholding(beta[my.roi[,1],], 0.01)
@@ -168,4 +221,5 @@ s# data.frame(roi = my.roi[,1], coef = alpha) %>% filter(abs(alpha) > 0.001)
 #     if(sum(abs(nz.beta_coef[j,1:i])) == 0){nz.my.roi[j,1:i] <- NA}
 #   }
 # }
+
 
