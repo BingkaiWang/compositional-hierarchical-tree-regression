@@ -1,5 +1,5 @@
 rm(list=ls())
-set.seed(123)
+set.seed(1234)
 # setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/simulation/")
 setwd("~/graphical_model/hierarchical-lasso")
 library(tidyverse)
@@ -105,7 +105,7 @@ calculate_beta <- function(my.roi, alpha){
 
 
 # data setup =====================
-n_sim <- 100
+n_sim <- 1000
 X_complete <- readRDS("sim2-data.rds")[[1]]
 sim.tree <- readRDS("sim2-data.rds")[[2]]
 n <- nrow(X_complete)
@@ -117,10 +117,10 @@ param_grid_tasso <- expand.grid(gamma = c(1e-4, 1e-2))
 #                  1.5 * rowSums(X_complete[,which(sim.tree$level1 == "Mesencephalon.lvl1")]) - 
 #                  rowSums(X_complete[,which(sim.tree$level1 == "Metencephalon.lvl1")])) * c(0.2, 1, 5) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 noise_st <- sd(rowSums(X_complete[,which(sim.tree$level1 == "Telencephalon_L.lvl1")]) - 
-                 rowSums(X_complete[,which(sim.tree$level1 == "Telencephalon_R.lvl1")])) * c(0.2, 1, 5) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
+                 rowSums(X_complete[,which(sim.tree$level1 == "Telencephalon_R.lvl1")])) * sqrt(c(0.1, 1, 10)) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 
 # sparse tree: Y = Telencephalon_L - Telencephalon_R
-beta_true <- c(rep(0,361), 1, -1, rep(0,7))
+beta_true <- c(rep(0,361), 1, -1, rep(0,6))
 sim2_st <- vector("list", length(noise_st))
 for(t in 1:length(sim2_st)){
   sim2_st[[t]] <- foreach(j = 1:n_sim, .combine = cbind, .packages = packages) %dopar% {

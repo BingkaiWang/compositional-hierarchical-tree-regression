@@ -113,10 +113,10 @@ p.leaf <- nrow(sim.tree)
 param_grid <- expand.grid(eta = seq(0.0, 1, by = 0.05))
 param_grid_lasso <- expand.grid(gamma = c(1e-4, 1e-2))
 param_grid_tasso <- expand.grid(gamma = c(1e-4, 1e-2))
-noise_sl <- sd(3 * X_complete[,1] - 2 * X_complete[,3] - X_complete[,5]) * c(0.2, 1, 5) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
+noise_sl <- sd(3 * X_complete[,1] - 2 * X_complete[,3] - X_complete[,5]) * sqrt(c(0.1, 1, 10)) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 
 # sparse tree: Y = 3 * SFG_L - 2 * SFG_PFC_L - SFG_pole_L
-beta_true <- c(3, 0, -2, 0, -1, 0, rep(0,364))
+beta_true <- c(3, 0, -2, 0, -1, 0, rep(0,363))
 sim2_sl <- vector("list", length(noise_sl))
 for(t in 1:length(sim2_sl)){
   sim2_sl[[t]] <- foreach(j = 1:n_sim, .combine = cbind, .packages = packages) %dopar% {

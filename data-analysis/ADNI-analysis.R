@@ -100,12 +100,12 @@ calculate_beta <- function(my.roi, alpha){
 }
 thresholding <- function(x, threshold) {ifelse(abs(x) > threshold, x, 0)}
 
-my.roi <- ROI.info[,-1] %>% mutate(All_brain = "all-brain")
+my.roi <- ROI.info[,-c(1,7)] %>% mutate(All_brain = "all-brain")
 my.roi[73:74,3] <- c("LimbicCN_L", "LimbicCN_R") # correct ROI names such that no region has more than 1 parent
 my.roi[89:90, 2] <- c("BasalForebrainBG_L", "BasalForebrainBG_R")
 my.roi[129:130, 2] <- c("PVA_posteriorIWM_L", "PVA_posteriorIWM_R")
-for(j in 1:6){my.roi[,j] <- paste0(my.roi[,j], ".lvl", 6-j)} # Since different regions may have the same name, this is to tell them apart.
-for(j in 6:2){
+for(j in 1:5){my.roi[,j] <- paste0(my.roi[,j], ".lvl", 6-j)} # Since different regions may have the same name, this is to tell them apart.
+for(j in 5:2){
   index <- unique(my.roi[,j])
   for(k in index){
     if(length(unique(my.roi[my.roi[,j] == k,j-1])) == 1){my.roi[my.roi[,j] == k,j-1] <- k}
@@ -120,8 +120,8 @@ X_complete <- dat[[6]][nonmissing_indi, ]
 X_complete <- X_complete / (rowSums(X_complete) %*% t(rep(1, ncol(X_complete))))
 param_grid <- expand.grid(eta = seq(0, 1, by = 0.05))
 n <- length(Y_complete)
-# saveRDS(list(X_complete, my.roi), "../simulation/sim2-data.rds")
-# saveRDS(my.roi, "tree-structure.rds")
+saveRDS(list(X_complete, my.roi), "../simulation/sim2-data.rds")
+saveRDS(my.roi, "tree-structure.rds")
 
 # All group analysis CTASSO
 tuning_param_all <- foreach(j = 1:nrow(param_grid), .combine = cbind, .packages = packages) %dopar% {

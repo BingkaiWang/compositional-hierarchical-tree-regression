@@ -1,7 +1,7 @@
 rm(list=ls())
 set.seed(123)
-setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/simulation/")
-# setwd("~/graphical_model/hierarchical-lasso")
+# setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/simulation/")
+setwd("~/graphical_model/hierarchical-lasso")
 library(tidyverse)
 library(glmnet)
 library(genlasso)
@@ -9,7 +9,7 @@ library(treemap)
 library(MASS)
 library(foreach)
 library(doParallel)
-cl <- makeCluster(2)
+cl <- makeCluster(16)
 registerDoParallel(cl)
 packages <- c("tidyverse", "genlasso", "MASS")
 
@@ -106,8 +106,8 @@ calculate_beta <- function(my.roi, alpha){
 
 
 # data setup =====================
-n <- 1000
-n_sim <- 10
+n <- 120
+n_sim <- 1000
 p.leaf <- 128
 pho <- 0.2
 sim.tree <- matrix(c(1:128,
@@ -127,7 +127,7 @@ for(i in 1:p.leaf){
 param_grid <- expand.grid(eta = seq(0.0, 1, by = 0.05))
 param_grid_lasso <- expand.grid(gamma = c(1e-4, 1e-2))
 param_grid_tasso <- expand.grid(gamma = c(1e-4, 1e-2))
-noise_st <- 0.154 * c(0.2, 1, 5) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
+noise_st <- 0.154 * sqrt(c(0.1, 1, 10)) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 
 # sparse tree
 beta_true <- c(rep(0,248), 1, -1, 0, 0, 1, -1)

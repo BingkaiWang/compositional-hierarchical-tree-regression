@@ -106,7 +106,7 @@ calculate_beta <- function(my.roi, alpha){
 
 
 # data setup =====================
-n <- 1000
+n <- 120
 n_sim <- 1000
 p.leaf <- 128
 pho <- 0.2
@@ -127,7 +127,7 @@ for(i in 1:p.leaf){
 param_grid <- expand.grid(eta = seq(0.0, 1, by = 0.05))
 param_grid_lasso <- expand.grid(gamma = c(1e-4, 1e-2))
 param_grid_tasso <- expand.grid(gamma = c(1e-4, 1e-2))
-noise_sl <- 0.0230 * c(0.2, 1, 5)  # sd(beta X):sd(eplsilon) = 5, 1, 0.2
+noise_sl <- 0.0230 * sqrt(c(0.1, 1, 10))  # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 
 # sparse tree
 beta_true <- c(1, -1, rep(0,126), 1, -1, rep(0,124))
