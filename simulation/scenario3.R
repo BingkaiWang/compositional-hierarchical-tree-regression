@@ -1,10 +1,10 @@
 rm(list=ls())
-set.seed(1234)
+set.seed(123)
 # setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/simulation/")
 setwd("~/graphical_model/hierarchical-lasso")
 library(tidyverse)
-library(glmnet)
-library(genlasso)
+library(glmnet) # for lasso regression
+library(genlasso) # for generalized lasso regression
 library(treemap)
 library(MASS)
 library(foreach)
@@ -13,6 +13,9 @@ cl <- makeCluster(16)
 registerDoParallel(cl)
 packages <- c("tidyverse", "genlasso", "MASS")
 
+# construct_D is a function to calculate D(eta) defined in Section 4 of the main paper. 
+# construct_TASSO is a function to construct the regularization function of TASSO.
+# calculate_beta is a function to calcuate beta based on alpha.
 construct_D <- function(my.roi, eta, scale = F, sd = NULL){
   q <- nrow(my.roi)
   weight.mat <- matrix(1, nrow = q, ncol = ncol(my.roi)-1)
@@ -113,24 +116,16 @@ p.leaf <- nrow(sim.tree)
 param_grid <- expand.grid(eta = seq(0.0, 1, by = 0.05))
 param_grid_lasso <- expand.grid(gamma = c(1e-4, 1e-2))
 param_grid_tasso <- expand.grid(gamma = c(1e-4, 1e-2))
-# noise_st <- sd(rowSums(X_complete[,which(sim.tree$level1 == "CSF.lvl1")]) - 
-#                  1.5 * rowSums(X_complete[,which(sim.tree$level1 == "Mesencephalon.lvl1")]) - 
-#                  rowSums(X_complete[,which(sim.tree$level1 == "Metencephalon.lvl1")])) * c(0.2, 1, 5) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
-noise_st <- sd(rowSums(X_complete[,which(sim.tree$level1 == "Telencephalon_L.lvl1")]) - 
-                 rowSums(X_complete[,which(sim.tree$level1 == "Telencephalon_R.lvl1")])) * sqrt(c(0.1, 1, 10)) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
+noise_sl <- sd(3 * X_complete[,1] - 2 * X_complete[,3] - X_complete[,5]) * sqrt(c(0.1, 1, 10)) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 
-# sparse tree: Y = Telencephalon_L - Telencephalon_R
-beta_true <- c(rep(0,361), 1, -1, rep(0,6))
-sim2_st <- vector("list", length(noise_st))
-for(t in 1:length(sim2_st)){
-  sim2_st[[t]] <- foreach(j = 1:n_sim, .combine = cbind, .packages = packages) %dopar% {
+# Scenario 3: leaf effect for brain tree Y = 3 * SFG_L - 2 * SFG_PFC_L - SFG_pole_L
+beta_true <- c(3, 0, -2, 0, -1, 0, rep(0,363))
+sim2_sl <- vector("list", length(noise_sl))
+for(t in 1:length(sim2_sl)){
+  sim2_sl[[t]] <- foreach(j = 1:n_sim, .combine = cbind, .packages = packages) %dopar% {
     X.leaf <- X_complete[sample(1:n, n, replace = T),]
     X.leaf.centered <- scale(X.leaf, scale = F)
-    # Y <- 3 + rowSums(X.leaf.centered[,which(sim.tree$level1 == "CSF.lvl1")]) - 
-    #   1.5 * rowSums(X.leaf.centered[,which(sim.tree$level1 == "Mesencephalon.lvl1")]) - 
-    #   rowSums(X.leaf.centered[,which(sim.tree$level1 == "Metencephalon.lvl1")]) + rnorm(n, sd = noise_st[t])
-    Y <- 3 + rowSums(X.leaf.centered[,which(sim.tree$level1 == "Telencephalon_L.lvl1")]) - 
-      rowSums(X.leaf.centered[,which(sim.tree$level1 == "Telencephalon_R.lvl1")]) + rnorm(n, sd = noise_st[t])
+    Y <- 3 + 3 * X.leaf.centered[,1] - 2 * X.leaf.centered[,3] - X.leaf.centered[,5] + rnorm(n, sd = noise_sl[t])
     Y.centered <- scale(Y, scale = F)
     result <- rep(NA, length = 30)
     
@@ -148,7 +143,7 @@ for(t in 1:length(sim2_st)){
       alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
       beta <- calculate_beta(sim.tree, alpha)
       c(tunning_param[1], sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-        specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))},
+        specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))},
       error = function(err) {print(err); rep(NA,5)}
     )
     
@@ -166,7 +161,7 @@ for(t in 1:length(sim2_st)){
       alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
       beta <- calculate_beta(sim.tree, alpha)
       c(tunning_param[1], sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01),
-        specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))},
+        specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))},
       error = function(err) {print(err); rep(NA,5)}
     )
     
@@ -185,7 +180,7 @@ for(t in 1:length(sim2_st)){
         alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
         beta <- calculate_beta(sim.tree, alpha)
         c(tunning_param, sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
       },
       error = function(err) {print(err); rep(NA,5)}
     )
@@ -205,7 +200,7 @@ for(t in 1:length(sim2_st)){
         alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
         beta <- calculate_beta(sim.tree, alpha)
         c(tunning_param, sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
       },
       error = function(err) {print(err); rep(NA,5)}
     )
@@ -226,7 +221,7 @@ for(t in 1:length(sim2_st)){
         alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
         beta <- calculate_beta(sim.tree, alpha)
         c(tunning_param, sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
       },
       error = function(err) {print(err); rep(NA,5)}
     )
@@ -247,12 +242,12 @@ for(t in 1:length(sim2_st)){
         alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
         beta <- calculate_beta(sim.tree, alpha)
         c(tunning_param, sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), SSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
       },
       error = function(err) {print(err); rep(NA,5)}
     )
     result
   }
 }
-saveRDS(object = sim2_st, file = "sim2_st.rds")
+saveRDS(object = sim2_sl, file = "sim2_sl.rds")
 

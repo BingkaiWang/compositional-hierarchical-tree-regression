@@ -3,8 +3,8 @@ set.seed(123)
 # setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/simulation/")
 setwd("~/graphical_model/hierarchical-lasso")
 library(tidyverse)
-library(glmnet)
-library(genlasso)
+library(glmnet) # for lasso regression
+library(genlasso) # for generalized lasso regression
 library(treemap)
 library(MASS)
 library(foreach)
@@ -13,7 +13,9 @@ cl <- makeCluster(16)
 registerDoParallel(cl)
 packages <- c("tidyverse", "genlasso", "MASS")
 
-
+# construct_D is a function to calculate D(eta) defined in Section 4 of the main paper. 
+# construct_TASSO is a function to construct the regularization function of TASSO.
+# calculate_beta is a function to calcuate beta based on alpha.
 construct_D <- function(my.roi, eta, scale = F, sd = NULL){
   q <- nrow(my.roi)
   weight.mat <- matrix(1, nrow = q, ncol = ncol(my.roi)-1)
@@ -127,18 +129,17 @@ for(i in 1:p.leaf){
 param_grid <- expand.grid(eta = seq(0.0, 1, by = 0.05))
 param_grid_lasso <- expand.grid(gamma = c(1e-4, 1e-2))
 param_grid_tasso <- expand.grid(gamma = c(1e-4, 1e-2))
-noise_st <- 0.154 * sqrt(c(0.1, 1, 10)) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
+noise_sl <- 0.0230 * sqrt(c(0.1, 1, 10))  # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 
-# sparse tree
-beta_true <- c(rep(0,248), 1, -1, 0, 0, 1, -1)
-# alpha_star_true <- c(rep(2,32), rep(0,32), rep(-1,128))
-sim1_st <- vector("list", length(noise_st))
-for(t in 1:length(sim1_st)){
-  sim1_st[[t]] <- foreach(j = 1:n_sim, .combine = cbind, .packages = packages) %dopar% {
+# Scenario 1: leaf effect for binary tree
+beta_true <- c(1, -1, rep(0,126), 1, -1, rep(0,124))
+sim1_sl <- vector("list", length(noise_sl))
+for(t in 1:length(sim1_sl)){
+  sim1_sl[[t]] <- foreach(j = 1:n_sim, .combine = cbind, .packages = packages) %dopar% {
     W.leaf <- exp(mvrnorm(n, mu = rep(0, p.leaf), Sigma = sigma.leaf))
     X.leaf <- W.leaf / (rowSums(W.leaf) %*% t(rep(1, p.leaf)))
     X.leaf.centered <- scale(X.leaf, scale = F)
-    Y <- 3 + 2 * rowSums(X.leaf.centered[,1:32]) - rowSums(X.leaf.centered[,65:128]) + rnorm(n, sd = noise_st[t])
+    Y <- 3 + 2 * X.leaf.centered[,1] - X.leaf.centered[,3] - X.leaf.centered[,4] + rnorm(n, sd = noise_sl[t])
     Y.centered <- scale(Y, scale = F)
     result <- rep(NA, length = 30)
     
@@ -193,8 +194,7 @@ for(t in 1:length(sim1_st)){
         alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
         beta <- calculate_beta(sim.tree, alpha)
         c(tunning_param, sensitivity = mean(abs(beta[which(abs(beta_true)>0)]) > 0.01), 
-          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), 
-          MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
+          specifity = mean(abs(beta[which(abs(beta_true)==0)]) < 0.01), MSE = sum((beta - beta_true)^2), ENP = sum(abs(beta) > 0.01))
       },
       error = function(err) {print(err); rep(NA,5)}
     )
@@ -250,7 +250,7 @@ for(t in 1:length(sim1_st)){
           min(IC)
         }) %>% which.min %>% param_grid_lasso[.,] %>% unlist()
         
-        sim.fit <- genlasso(y = Y.centered, X = X.leaf.centered, D = diag(p.leaf), eps = tunning_param)
+        sim.fit <- genlasso(y = Y, X = X.leaf.centered, D = diag(p.leaf), eps = tunning_param)
         df <- sim.fit$df
         IC <- n * log(colSums((Y.centered %*% t(rep(1,length(df))) - sim.fit$fit)^2)) + log(n) * df
         alpha <- coef(sim.fit, lambda = sim.fit$lambda[which.min(IC)])$beta
@@ -264,5 +264,5 @@ for(t in 1:length(sim1_st)){
     result
   }
 }
-saveRDS(object = sim1_st, file = "sim1_st.rds")
+saveRDS(object = sim1_sl, file = "sim1_sl.rds")
 

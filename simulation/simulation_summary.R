@@ -3,6 +3,8 @@ library(tidyverse)
 library(xtable)
 setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/simulation/")
 
+# summarizing all simulation results into tables. 
+# For some settings, we remove the results of a few simulated data sets (less than 1%), since these data sets make the leaf varibles not linearly independent and the results are outliers.
 methods <- c("CTASSO-AIC", "CTASSO-BIC", "TASSO-AIC", "TASSO-BIC", "LASSO-AIC", "LASSO-BIC")
 metrics <- c("Tuning parameter", "sensitivity", "specifity", "SSE", "df")
 
@@ -26,7 +28,7 @@ t2 <- data.frame(method = rownames(t2_mean),
 t2
 xtable(t2)
 
-# 25var(beta X) = var(epsilon)
+# 10var(beta X) = var(epsilon)
 sim1_sl_mean <- readRDS("sim1_sl.rds") %>% map(~(apply(.,1,mean) %>% matrix(nrow = 5, ncol = 6, dimnames = list(metrics, methods)) %>% t))
 sim1_st_mean <- readRDS("sim1_st.rds") %>% map(~(apply(.[,-c(436, 115, 412, 625, 882, 187, 419)],1,mean) %>% matrix(nrow = 5, ncol = 6, dimnames = list(metrics, methods)) %>% t))
 sim2_sl_mean <- readRDS("sim2_sl.rds") %>% map(~(apply(.[,-c(875,58, 609,967, 626, 70, 930)],1,mean) %>% matrix(nrow = 5, ncol = 6, dimnames = list(metrics, methods)) %>% t))
