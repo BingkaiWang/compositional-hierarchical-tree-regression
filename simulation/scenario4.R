@@ -3,21 +3,6 @@ set.seed(123)
 # setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/simulation/")
 setwd("~/graphical_model/hierarchical-lasso")
 library(tidyverse)
-library(glmnet)
-library(genlasso)
-library(treemap)
-library(MASS)
-library(foreach)
-library(doParallel)
-cl <- makeCluster(16)
-registerDoParallel(cl)
-packages <- c("tidyverse", "genlasso", "MASS")
-
-rm(list=ls())
-set.seed(123)
-# setwd("~/Dropbox/research/graphical-model/hierarchical-lasso/compositional-hierarchical-tree-regression/simulation/")
-setwd("~/graphical_model/hierarchical-lasso")
-library(tidyverse)
 library(glmnet) # for lasso regression
 library(genlasso) # for generalized lasso regression
 library(treemap)
@@ -131,9 +116,6 @@ p.leaf <- nrow(sim.tree)
 param_grid <- expand.grid(eta = seq(0.0, 1, by = 0.05))
 param_grid_lasso <- expand.grid(gamma = c(1e-4, 1e-2))
 param_grid_tasso <- expand.grid(gamma = c(1e-4, 1e-2))
-# noise_st <- sd(rowSums(X_complete[,which(sim.tree$level1 == "CSF.lvl1")]) - 
-#                  1.5 * rowSums(X_complete[,which(sim.tree$level1 == "Mesencephalon.lvl1")]) - 
-#                  rowSums(X_complete[,which(sim.tree$level1 == "Metencephalon.lvl1")])) * c(0.2, 1, 5) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 noise_st <- sd(rowSums(X_complete[,which(sim.tree$level1 == "Telencephalon_L.lvl1")]) - 
                  rowSums(X_complete[,which(sim.tree$level1 == "Telencephalon_R.lvl1")])) * sqrt(c(0.1, 1, 10)) # sd(beta X):sd(eplsilon) = 5, 1, 0.2
 
@@ -144,9 +126,6 @@ for(t in 1:length(sim2_st)){
   sim2_st[[t]] <- foreach(j = 1:n_sim, .combine = cbind, .packages = packages) %dopar% {
     X.leaf <- X_complete[sample(1:n, n, replace = T),]
     X.leaf.centered <- scale(X.leaf, scale = F)
-    # Y <- 3 + rowSums(X.leaf.centered[,which(sim.tree$level1 == "CSF.lvl1")]) - 
-    #   1.5 * rowSums(X.leaf.centered[,which(sim.tree$level1 == "Mesencephalon.lvl1")]) - 
-    #   rowSums(X.leaf.centered[,which(sim.tree$level1 == "Metencephalon.lvl1")]) + rnorm(n, sd = noise_st[t])
     Y <- 3 + rowSums(X.leaf.centered[,which(sim.tree$level1 == "Telencephalon_L.lvl1")]) - 
       rowSums(X.leaf.centered[,which(sim.tree$level1 == "Telencephalon_R.lvl1")]) + rnorm(n, sd = noise_st[t])
     Y.centered <- scale(Y, scale = F)
@@ -228,7 +207,7 @@ for(t in 1:length(sim2_st)){
       error = function(err) {print(err); rep(NA,5)}
     )
     
-    # LASSO with AIC
+    # CLASSO with AIC
     result[21:25] <- tryCatch(
       {
         tunning_param <- map_dbl(1:nrow(param_grid_lasso), function(j){
@@ -249,7 +228,7 @@ for(t in 1:length(sim2_st)){
       error = function(err) {print(err); rep(NA,5)}
     )
     
-    # LASSO with BIC
+    # CLASSO with BIC
     result[26:30] <- tryCatch(
       {
         tunning_param <- map_dbl(1:nrow(param_grid_lasso), function(j){

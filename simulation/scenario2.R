@@ -221,7 +221,7 @@ for(t in 1:length(sim1_st)){
       error = function(err) {print(err); rep(NA,5)}
     )
     
-    # LASSO with AIC
+    # CLASSO with AIC
     result[21:25] <- tryCatch(
       {
         tunning_param <- map_dbl(1:nrow(param_grid_lasso), function(j){
@@ -242,7 +242,7 @@ for(t in 1:length(sim1_st)){
       error = function(err) {print(err); rep(NA,5)}
     )
     
-    # LASSO with BIC
+    # CLASSO with BIC
     result[26:30] <- tryCatch(
       {
         tunning_param <- map_dbl(1:nrow(param_grid_lasso), function(j){
